@@ -43,6 +43,14 @@ class Report:
 
 _KIND_LABEL = {"runner": "", "action": "action ", "tool": "", "package": "package "}
 SHOWN_COMMITS = 5
+_GREEN = "\033[32m"
+_RED = "\033[31m"
+_RESET = "\033[0m"
+
+
+def _paint(text: str, color_code: str, enabled: bool) -> str:
+    """Apply terminal colour only when explicitly enabled."""
+    return f"{color_code}{text}{_RESET}" if enabled else text
 
 
 def _change_row(change: Change) -> tuple[str, str]:
@@ -80,7 +88,7 @@ def _clip(text: str) -> str:
     return text if len(text) <= LINE_WIDTH else text[: LINE_WIDTH - 1] + "…"
 
 
-def render_text(report: Report, max_lines: int = 30) -> str:
+def render_text(report: Report, max_lines: int = 30, color: bool = False) -> str:
     out: list[str] = []
     if report.red:
         out.append(_run_line("red", report.red))
@@ -103,7 +111,15 @@ def render_text(report: Report, max_lines: int = 30) -> str:
         out.append(f"Environment changes ({len(report.changes)})")
         rows = [_change_row(c) for c in report.changes]
         width = min(max(len(name) for name, _ in rows), 44)
-        out.extend(f"  {name:<{width}}  {values}" for name, values in rows)
+        for name, values in rows:
+            if color and " → " in values:
+                arrow_pos = values.index(" → ")
+                prefix = values[:arrow_pos]
+                arrow_and_new = values[arrow_pos + 1 :]  # "→ <new>"
+                coloured_values = prefix + " " + _paint(arrow_and_new, _GREEN, color)
+            else:
+                coloured_values = values
+            out.append(f"  {name:<{width}}  {coloured_values}")
     else:
         out.append("Environment changes: none found")
     out.append("")
@@ -118,7 +134,11 @@ def render_text(report: Report, max_lines: int = 30) -> str:
         width = len(str(shown_lines[-1].line))
         for new in shown_lines:
             repeat = f"  (x{new.repeats})" if new.repeats > 1 else ""
-            out.append(f"  {new.line:>{width}}  {_clip(new.text)}{repeat}")
+            clipped = _clip(new.text)
+            coloured_text = (
+                _paint(clipped, _RED, color) if color and clipped.startswith("Error:") else clipped
+            )
+            out.append(f"  {new.line:>{width}}  {coloured_text}{repeat}")
     return "\n".join(out) + "\n"
 
 

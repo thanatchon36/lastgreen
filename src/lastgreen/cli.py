@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+from typing import Protocol
 
 from lastgreen import __version__, github
 from lastgreen.analyze import compare_logs
@@ -22,6 +24,20 @@ NO_TOKEN = (
     "lastgreen needs a GitHub token to read Actions logs; GitHub requires one even for public "
     "repositories. Run `gh auth login`, or set GH_TOKEN."
 )
+
+
+class _SupportsIsatty(Protocol):
+    def isatty(self) -> bool: ...
+
+
+def _should_use_color(stream: _SupportsIsatty | None = None) -> bool:
+    """Return whether coloured terminal output is enabled.
+
+    Pass *stream* in tests to avoid patching ``sys.stdout`` directly.
+    When *stream* is ``None`` (the default), ``sys.stdout`` is used.
+    """
+    target: _SupportsIsatty = stream if stream is not None else sys.stdout
+    return target.isatty() and not os.environ.get("NO_COLOR", "")
 
 
 def _add_output_options(parser: argparse.ArgumentParser) -> None:
@@ -57,12 +73,12 @@ def _diff_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _render(report: Report, fmt: str, max_lines: int) -> str:
+def _render(report: Report, fmt: str, max_lines: int, color: bool = False) -> str:
     if fmt == "json":
         return render_json(report)
     if fmt == "markdown":
         return render_markdown(report, max_lines)
-    return render_text(report, max_lines)
+    return render_text(report, max_lines, color=color)
 
 
 def _read(path: Path) -> str:
@@ -188,5 +204,5 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         return 130
-    sys.stdout.write(_render(report, args.format, args.max_lines))
+    sys.stdout.write(_render(report, args.format, args.max_lines, _should_use_color()))
     return 0
