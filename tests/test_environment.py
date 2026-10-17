@@ -93,6 +93,42 @@ def test_package_formats() -> None:
     }
 
 
+def test_maven_dependency_version_changes() -> None:
+    green = stamp(
+        [
+            (
+                "Downloaded from central: "
+                "https://repo.maven.apache.org/maven2/org/slf4j/"
+                "slf4j-api/2.0.12/slf4j-api-2.0.12.jar "
+                "(68 kB at 1.2 MB/s)"
+            )
+        ]
+    )
+    red = stamp(
+        [
+            (
+                "Downloaded from central: "
+                "https://repo.maven.apache.org/maven2/org/slf4j/"
+                "slf4j-api/2.0.13/slf4j-api-2.0.13.jar "
+                "(68 kB at 1.2 MB/s)"
+            )
+        ]
+    )
+    assert changes(green, red) == [Change("package", "org.slf4j:slf4j-api", "2.0.12", "2.0.13")]
+
+
+def test_gradle_dependency_version_changes() -> None:
+    green = stamp(["|    +--- org.slf4j:slf4j-api:2.0.12"])
+    red = stamp(["|    +--- org.slf4j:slf4j-api:2.0.13"])
+    assert changes(green, red) == [Change("package", "org.slf4j:slf4j-api", "2.0.12", "2.0.13")]
+
+
+def test_gradle_resolved_dependency_version() -> None:
+    green = stamp(["|    +--- org.slf4j:slf4j-api:2.0.12 -> 2.0.13"])
+    red = stamp(["|    +--- org.slf4j:slf4j-api:2.0.12 -> 2.0.14"])
+    assert changes(green, red) == [Change("package", "org.slf4j:slf4j-api", "2.0.13", "2.0.14")]
+
+
 def test_package_names_are_normalized_across_spellings() -> None:
     green = stamp(["Successfully installed Typing_Extensions-4.12.2"])
     red = stamp(["Successfully installed typing-extensions-4.12.2"])
@@ -175,4 +211,40 @@ def test_version_suffixes() -> None:
 def test_versions_derived_from_the_commit_are_code_not_environment() -> None:
     green = stamp(["building pytest 9.2.0.dev353+ge84e063e7 sdist"])
     red = stamp(["building pytest 9.2.0.dev355+g2950bc239 sdist"])
+    assert changes(green, red) == []
+
+
+def test_maven_info_prefixed_downloads() -> None:
+    green = stamp(
+        [
+            "[INFO] Downloaded from central: "
+            "https://repo.maven.apache.org/maven2/org/slf4j/"
+            "slf4j-api/2.0.12/slf4j-api-2.0.12.jar (68 kB)",
+        ]
+    )
+    red = stamp(
+        [
+            "[INFO] Downloaded from central: "
+            "https://repo.maven.apache.org/maven2/org/slf4j/"
+            "slf4j-api/2.0.13/slf4j-api-2.0.13.jar (68 kB)",
+        ]
+    )
+    assert changes(green, red) == [Change("package", "org.slf4j:slf4j-api", "2.0.12", "2.0.13")]
+
+
+def test_maven_download_start_is_ignored() -> None:
+    green = stamp(
+        [
+            "[INFO] Downloading from central: "
+            "https://repo.maven.apache.org/maven2/org/slf4j/"
+            "slf4j-api/2.0.12/slf4j-api-2.0.12.jar",
+        ]
+    )
+    red = stamp(
+        [
+            "[INFO] Downloading from central: "
+            "https://repo.maven.apache.org/maven2/org/slf4j/"
+            "slf4j-api/2.0.13/slf4j-api-2.0.13.jar",
+        ]
+    )
     assert changes(green, red) == []

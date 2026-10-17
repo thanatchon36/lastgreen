@@ -12,6 +12,7 @@ All notable changes to this project are documented here. The format follows
   are coloured green; lines containing `Error:` are coloured red. Colours are enabled only
   when stdout is a TTY and the `NO_COLOR` environment variable is unset or empty, honouring
   the [NO_COLOR](https://no-color.org/) spec. Markdown and JSON output are never coloured.
+- Detect Maven and Gradle dependency version changes in build logs.
 
 ## [0.1.0] - 2026-10-12
 

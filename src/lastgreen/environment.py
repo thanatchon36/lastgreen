@@ -4,7 +4,8 @@ Three sources, in order of confidence:
 
 1. GitHub's job preamble: runner image, operating system, runner version, and the exact
    commit each action resolved to.
-2. Package lists printed by installers (pip, uv, tox, poetry, cargo, go, bundler, pnpm).
+2. Package lists printed by installers (pip, uv, tox, poetry, cargo, go, bundler, pnpm,
+   Maven, and Gradle).
 3. Any other line that appears exactly once in both logs and differs only in version
    numbers, such as `git version 2.55.0` or `Successfully set up CPython (3.14.7)`.
    This catches tools nobody wrote a rule for.
@@ -46,6 +47,37 @@ _PACKAGE_LINES = [
         r"\.(?:tar\.gz|zip)\b"
     ),
 ]
+
+# Maven artifact downloads.
+# Supports standard Maven Central URLs and optional Maven [INFO] prefixes.
+_MAVEN_DOWNLOAD = re.compile(
+    r"^(?:\[INFO\]\s+)?"
+    r"(?P<status>Downloading|Downloaded) from \S+: "
+    r"https?://[^/\s]+/"
+    r"(?:[^/\s]+/)*?maven2/"
+    r"(?P<group_path>(?:[^/\s]+/)+?)"
+    r"(?P<artifact>[^/\s]+)/"
+    r"(?P<version>[^/\s]+)/"
+    r"(?P<filename>[^/\s]+\.(?:jar|pom))(?:\s|$)"
+)
+
+# Match Maven download lines even when their URL cannot be parsed as an artifact.
+# This prevents incomplete downloads from being treated as generic tool changes.
+_MAVEN_DOWNLOAD_LINE = re.compile(
+    r"^(?:\[INFO\]\s+)?(?:Downloading|Downloaded) from \S+: https?://"
+)
+
+# Gradle dependency reports commonly contain lines such as:
+# |    +--- org.slf4j:slf4j-api:2.0.12 -> 2.0.13
+# \--- com.google.guava:guava:33.0.0-jre
+_GRADLE_DEPENDENCY = re.compile(
+    r"^\s*(?:[+\\| ]*---)\s+"
+    r"(?P<group>[A-Za-z0-9_.-]+):"
+    r"(?P<artifact>[A-Za-z0-9_.-]+):"
+    r"(?P<requested>[^\s()]+)"
+    r"(?:\s+->\s+(?P<resolved>[^\s()]+))?"
+    r"(?:\s|$)"
+)
 
 _VERSION = re.compile(
     r"(?<![\w.])(v?\d+(?:\.\d+)+(?:(?:a|b|rc|\.dev|\.post)\d+)*"
@@ -98,11 +130,41 @@ def _packages_in(line: str) -> list[tuple[str, str]]:
             if sep and name and version[:1].isdigit():
                 found.append((name, version))
         return found
+
     # uv prints "- pkg==old" before "+ pkg==new"; the removed version is not installed.
     if not stripped.startswith("-"):
         pinned = _PINNED.findall(line)
         if pinned:
             return pinned
+
+    # Ignore incomplete or unrecognized Maven downloads as package changes.
+    match = _MAVEN_DOWNLOAD.match(stripped)
+    if match:
+        if match.group("status") != "Downloaded":
+            return []
+
+        group_id = match.group("group_path").rstrip("/").replace("/", ".")
+        artifact = match.group("artifact")
+        version = match.group("version")
+        filename = match.group("filename")
+
+        # Verify that the filename matches the artifact coordinates.
+        if filename not in (f"{artifact}-{version}.jar", f"{artifact}-{version}.pom"):
+            return []
+
+        return [(f"{group_id}:{artifact}", version)]
+
+    # Gradle dependency reports may show a requested version and a resolved version.
+    match = _GRADLE_DEPENDENCY.match(stripped)
+    if match:
+        group = match.group("group")
+        artifact = match.group("artifact")
+        version = match.group("resolved") or match.group("requested")
+
+        # Ignore dynamic selectors and unresolved constraints.
+        if version and re.match(r"^\d[\w.+-]*$", version):
+            return [(f"{group}:{artifact}", version)]
+
     for pattern in _PACKAGE_LINES:
         match = pattern.match(line)
         if match:
@@ -154,6 +216,9 @@ def extract(log: JobLog) -> Facts:
         if packages:
             for name, version in packages:
                 _add_package(facts, name, version)
+            continue
+        # Maven download-start lines must not fall through to generic version detection.
+        if _MAVEN_DOWNLOAD_LINE.match(text.strip()):
             continue
         spans = _versions_in(text)
         if spans:
